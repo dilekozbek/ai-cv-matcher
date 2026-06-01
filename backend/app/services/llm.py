@@ -1,14 +1,21 @@
+import time
+
+from fastapi import HTTPException
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 
 from app.config import settings
 from app.schemas import MatchResult
 
-#Gemini client 
+# Gemini client
 client = genai.Client(api_key=settings.gemini_api_key)
 
+
 def analyze_match(cv_text: str, jd_text: str) -> MatchResult:
-    """CV ve JD'yi LLM'e ver, structured eşleşme analizi al."""
+    """CV ve JD'yi LLM'e ver, structured eşleşme analizi al.
+
+    Rate limit (429) gelirse 30 sn bekleyip 3 kez tekrar deneriz.
+    """
     prompt = f"""Aşağıdaki CV'yi iş ilanına göre analiz et.
 0-100 arası eşleşme skoru ver, eşleşen ve eksik becerileri listele, kısa Türkçe özet yaz.
 
@@ -27,15 +34,25 @@ JOB DESCRIPTION:
 {jd_text}
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.2,
-            max_output_tokens=800,
-            response_mime_type="application/json",
-            response_schema=MatchResult,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-        ),
-    )
-    return response.parsed
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=800,
+                    response_mime_type="application/json",
+                    response_schema=MatchResult,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
+            return response.parsed
+        except errors.ClientError as e:
+            if e.code == 429 and attempt < 2:
+                time.sleep(30)
+                continue
+            raise HTTPException(
+                status_code=e.code or 500,
+                detail="LLM servisi şu an meşgul, lütfen biraz sonra tekrar deneyin." if e.code == 429 else str(e),
+            )

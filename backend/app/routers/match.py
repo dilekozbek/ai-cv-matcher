@@ -1,3 +1,5 @@
+import datetime as dt
+
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
 from app.schemas import MatchResult
@@ -7,6 +9,25 @@ from app.services.llm import analyze_match
 router = APIRouter(prefix="/match", tags=["match"])
 
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_DAILY_REQUESTS = 50          # tüm kullanıcılar için günlük limit
+
+# In-memory daily counter (process restart'ta sıfırlanır — production'da Redis olur)
+_daily_counter = {"date": dt.date.today(), "count": 0}
+
+
+def _check_and_increment_daily_quota():
+    today = dt.date.today()
+    if _daily_counter["date"] != today:
+        _daily_counter["date"] = today
+        _daily_counter["count"] = 0
+
+    if _daily_counter["count"] >= MAX_DAILY_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
+        )
+
+    _daily_counter["count"] += 1
 
 
 @router.post("", response_model=MatchResult)
@@ -14,6 +35,9 @@ async def match_cv_with_jd(
     cv_file: UploadFile = File(...),
     jd_text: str = Form(...),
 ):
+    # 0. Quota check — public demo abuse koruması
+    _check_and_increment_daily_quota()
+
     # 1. Cheap checks — file metadata
     if not cv_file or not cv_file.filename:
         raise HTTPException(status_code=400, detail="CV dosyası eksik")

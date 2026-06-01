@@ -9,17 +9,27 @@ type MatchResult = {
   summary: string
 }
 
+const MAX_QUERIES_PER_SESSION = 5
+
 export default function Home() {
   const [cvFile, setCvFile] = useState<File | null>(null)
   const [jdText, setJdText] = useState('')
   const [result, setResult] = useState<MatchResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [queryCount, setQueryCount] = useState(0)
+
+  const queriesLeft = MAX_QUERIES_PER_SESSION - queryCount
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!cvFile || !jdText.trim()) {
       setError('CV and job description are required')
+      return
+    }
+
+    if (queryCount >= MAX_QUERIES_PER_SESSION) {
+      setError(`Session limit reached (${MAX_QUERIES_PER_SESSION} queries). Refresh the page to reset.`)
       return
     }
 
@@ -42,6 +52,7 @@ export default function Home() {
       }
       const data: MatchResult = await res.json()
       setResult(data)
+      setQueryCount((c) => c + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -107,11 +118,17 @@ export default function Home() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || queriesLeft <= 0}
             className="w-full bg-gradient-to-r from-orange-600 via-orange-800 to-emerald-700 hover:from-orange-700 hover:via-orange-900 hover:to-emerald-700 text-white py-3 rounded-xl font-semibold shadow-lg shadow-orange-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-[1.01] active:scale-[0.99]"
           >
             {loading ? 'Analyzing…' : 'Analyze Match'}
           </button>
+
+          <p className="text-xs text-slate-500 text-center">
+            {queriesLeft > 0
+              ? `${queriesLeft} of ${MAX_QUERIES_PER_SESSION} queries left in this session`
+              : 'Session limit reached — refresh the page to reset.'}
+          </p>
         </form>
 
         {error && (
